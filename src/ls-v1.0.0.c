@@ -22,21 +22,26 @@
 #include <sys/types.h>
 extern int errno;
 // Function prototypes
-void do_ls(const char *dir, int long_listing);
+void do_ls(const char *dir, int long_listing, int horizontal_display);
 void mode_to_string(mode_t mode, char *str);
 void format_time(time_t mtime, char *time_str);
 void display_columns(char **files, int count, int terminal_width);
+void display_horizontal(char **files, int count, int terminal_width);
 
 int main(int argc, char const *argv[])
 {
     int long_listing = 0;
+    int horizontal_display = 0; 
     int opt;
     
     // Parse command line options
-    while ((opt = getopt(argc, (char *const *)argv, "l")) != -1) {
+    while ((opt = getopt(argc, (char *const *)argv, "lx")) != -1) {
         switch (opt) {
             case 'l':
                 long_listing = 1;
+                break;
+	    case 'x':
+                horizontal_display = 1;
                 break;
             default:
                 fprintf(stderr, "Usage: %s [-l] [directory...]\n", argv[0]);
@@ -48,11 +53,11 @@ int main(int argc, char const *argv[])
     int non_opt_args = argc - optind;
     
     if (non_opt_args == 0) {
-        do_ls(".", long_listing);
+        do_ls(".", long_listing, horizontal_display);
     } else {
         for (int i = optind; i < argc; i++) {
             printf("Directory listing of %s:\n", argv[i]);
-            do_ls(argv[i], long_listing);
+            do_ls(argv[i], long_listing, horizontal_display);
             puts("");
         }
     }
@@ -79,6 +84,36 @@ void format_time(time_t mtime, char *time_str) {
     char *raw_time = ctime(&mtime);
     strncpy(time_str, raw_time + 4, 12); // Get "Mon DD HH:MM"
     time_str[12] = '\0';
+}
+
+// Display files in horizontal (across) format
+void display_horizontal(char **files, int count, int terminal_width) {
+    if (count == 0) return;
+    
+    // Find the longest filename length
+    int max_len = 0;
+    for (int i = 0; i < count; i++) {
+        int len = strlen(files[i]);
+        if (len > max_len) max_len = len;
+    }
+    
+    int col_width = max_len + 2; // Add 2 spaces between columns
+    int current_width = 0;
+    
+    for (int i = 0; i < count; i++) {
+        int needed_width = strlen(files[i]) + 2;
+        
+        // Check if we need a new line
+        if (current_width + needed_width > terminal_width && current_width > 0) {
+            printf("\n");
+            current_width = 0;
+        }
+        
+        printf("%-*s", col_width, files[i]);
+        current_width += col_width;
+    }
+    
+    if (count > 0) printf("\n");
 }
 
 // Display files in column format (down then across)
@@ -111,22 +146,24 @@ void display_columns(char **files, int count, int terminal_width) {
     }
 }
 
-void do_ls(const char *dir, int long_listing)
+void do_ls(const char *dir, int long_listing, int horizontal_display)
 {
     struct dirent *entry;
     DIR *dp = opendir(dir);
-    int count = 0;  // ADD THIS LINE
+    int count = 0;
     
     if (dp == NULL) {
         fprintf(stderr, "Cannot open directory: %s\n", dir);
         return;
     }
+    
+    // First pass: count files and handle long listing
     errno = 0;
     while ((entry = readdir(dp)) != NULL) {
         if (entry->d_name[0] == '.')
             continue;
-        
-        count++;  // ADD THIS LINE to count non-hidden files
+            
+        count++;
         
         if (long_listing) {
             // Long listing format
@@ -135,7 +172,7 @@ void do_ls(const char *dir, int long_listing)
             
             struct stat file_stat;
             if (stat(full_path, &file_stat) == -1) {
-                perror("lstat");
+                perror("stat");
                 continue;
             }
             
@@ -159,16 +196,10 @@ void do_ls(const char *dir, int long_listing)
                    file_stat.st_size,
                    time_str,
                    entry->d_name);
-        } else {
-            // We'll handle simple format after reading all entries
-            // Just collect the filenames for now
         }
     }
-    
-    if (errno != 0) {
-        perror("readdir failed");
-    }
-    // Handle simple (column) display after reading all entries
+
+    // Handle column/horizontal display after reading all entries
     if (!long_listing) {
         // Get terminal width
         struct winsize w;
@@ -203,14 +234,22 @@ void do_ls(const char *dir, int long_listing)
             index++;
         }
         
-        // Display in columns
-        display_columns(files, count, terminal_width);
+        // Choose display mode
+        if (horizontal_display) {
+            display_horizontal(files, count, terminal_width);
+        } else {
+            display_columns(files, count, terminal_width);
+        }
         
         // Cleanup
         for (int i = 0; i < count; i++) {
             free(files[i]);
         }
         free(files);
+    }
+    
+    if (errno != 0) {
+        perror("readdir failed");
     }
     
     closedir(dp);
