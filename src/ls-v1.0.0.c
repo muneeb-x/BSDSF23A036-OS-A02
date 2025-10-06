@@ -18,12 +18,14 @@
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 extern int errno;
 // Function prototypes
 void do_ls(const char *dir, int long_listing);
 void mode_to_string(mode_t mode, char *str);
 void format_time(time_t mtime, char *time_str);
+void display_columns(char **files, int count, int terminal_width);
 
 int main(int argc, char const *argv[])
 {
@@ -79,20 +81,53 @@ void format_time(time_t mtime, char *time_str) {
     time_str[12] = '\0';
 }
 
+// Display files in column format (down then across)
+void display_columns(char **files, int count, int terminal_width) {
+    if (count == 0) return;
+    
+    // Find the longest filename length
+    int max_len = 0;
+    for (int i = 0; i < count; i++) {
+        int len = strlen(files[i]);
+        if (len > max_len) max_len = len;
+    }
+    
+    // Calculate column layout
+    int col_width = max_len + 2; // Add 2 spaces between columns
+    int num_cols = terminal_width / col_width;
+    if (num_cols == 0) num_cols = 1; // At least 1 column
+    
+    int num_rows = (count + num_cols - 1) / num_cols; // Ceiling division
+    
+    // Print in "down then across" order
+    for (int row = 0; row < num_rows; row++) {
+        for (int col = 0; col < num_cols; col++) {
+            int index = row + col * num_rows;
+            if (index < count) {
+                printf("%-*s", col_width, files[index]);
+            }
+        }
+        printf("\n");
+    }
+}
+
 void do_ls(const char *dir, int long_listing)
 {
     struct dirent *entry;
     DIR *dp = opendir(dir);
+    int count = 0;  // ADD THIS LINE
+    
     if (dp == NULL) {
         fprintf(stderr, "Cannot open directory: %s\n", dir);
         return;
     }
-    
     errno = 0;
     while ((entry = readdir(dp)) != NULL) {
         if (entry->d_name[0] == '.')
             continue;
-            
+        
+        count++;  // ADD THIS LINE to count non-hidden files
+        
         if (long_listing) {
             // Long listing format
             char full_path[1024];
@@ -125,13 +160,57 @@ void do_ls(const char *dir, int long_listing)
                    time_str,
                    entry->d_name);
         } else {
-            // Simple format
-            printf("%s\n", entry->d_name);
+            // We'll handle simple format after reading all entries
+            // Just collect the filenames for now
         }
     }
     
     if (errno != 0) {
         perror("readdir failed");
+    }
+    // Handle simple (column) display after reading all entries
+    if (!long_listing) {
+        // Get terminal width
+        struct winsize w;
+        int terminal_width = 80; // Default fallback
+        
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != -1) {
+            terminal_width = w.ws_col;
+        }
+        
+        // Create array of filenames
+        char **files = malloc(count * sizeof(char *));
+        if (!files) {
+            perror("malloc failed");
+            closedir(dp);
+            return;
+        }
+        
+        // Reset and read directory again to collect filenames
+        rewinddir(dp);
+        int index = 0;
+        errno = 0;
+        while ((entry = readdir(dp)) != NULL) {
+            if (entry->d_name[0] == '.') continue;
+            
+            files[index] = malloc(strlen(entry->d_name) + 1);
+            if (!files[index]) {
+                perror("malloc failed");
+                closedir(dp);
+                return;
+            }
+            strcpy(files[index], entry->d_name);
+            index++;
+        }
+        
+        // Display in columns
+        display_columns(files, count, terminal_width);
+        
+        // Cleanup
+        for (int i = 0; i < count; i++) {
+            free(files[i]);
+        }
+        free(files);
     }
     
     closedir(dp);
