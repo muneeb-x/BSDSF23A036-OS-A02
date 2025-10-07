@@ -1,16 +1,17 @@
 /*
  * Programming Assignment 02: lsv1.0.0
- * Updated for Feature 6: Colorized Output
- * Features: Basic ls, Long format (-l), Column display, Horizontal display (-x), Alphabetical sort, Colors
+ * Updated for Feature 7: Recursive Listing
+ * Features: Basic ls, Long format (-l), Column display, Horizontal display (-x), 
+ *           Alphabetical sort, Colors, Recursive listing (-R)
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <string.h>
 #include <errno.h>
-#define _GNU_SOURCE
 #include <sys/stat.h>
 #include <getopt.h>
 #include <pwd.h>
@@ -21,7 +22,7 @@
 
 extern int errno;
 
-// ANSI Color Codes - NEW FOR FEATURE 6
+// ANSI Color Codes
 #define COLOR_RESET   "\033[0m"
 #define COLOR_BLUE    "\033[1;34m"
 #define COLOR_GREEN   "\033[1;32m"
@@ -31,21 +32,22 @@ extern int errno;
 #define COLOR_YELLOW  "\033[1;33m"
 #define COLOR_REVERSE "\033[7m"
 
-// Function prototypes
-void do_ls(const char *dir, int long_listing, int horizontal_display);
+// Function prototypes - UPDATED FOR FEATURE 7
+void do_ls(const char *dir, int long_listing, int horizontal_display, int recursive);
+void do_ls_recursive(const char *dir, int long_listing, int horizontal_display);
 void mode_to_string(mode_t mode, char *str);
 void format_time(time_t mtime, char *time_str);
 void display_columns(char **files, int count, int terminal_width);
 void display_horizontal(char **files, int count, int terminal_width);
 int compare_strings(const void *a, const void *b);
-const char *get_file_color(const char *filename, mode_t mode);  // NEW FOR FEATURE 6
+const char *get_file_color(const char *filename, mode_t mode);
 
 // Comparison function for qsort
 int compare_strings(const void *a, const void *b) {
     return strcmp(*(const char **)a, *(const char **)b);
 }
 
-// NEW FOR FEATURE 6: Determine color based on file type and permissions
+// Determine color based on file type and permissions
 const char *get_file_color(const char *filename, mode_t mode) {
     if (S_ISDIR(mode)) {
         return COLOR_BLUE;           // Directories: Blue
@@ -53,8 +55,8 @@ const char *get_file_color(const char *filename, mode_t mode) {
     else if (S_ISLNK(mode)) {
         return COLOR_PINK;           // Symbolic links: Pink
     }
-    else if (S_ISCHR(mode) || S_ISBLK(mode) || S_ISFIFO(mode)) {
-        return COLOR_REVERSE;        // Special files: Reverse video
+    else if (S_ISCHR(mode) || S_ISBLK(mode)) {
+        return COLOR_REVERSE;        // Device files: Reverse video
     }
     else if (mode & S_IXUSR) {
         return COLOR_GREEN;          // Executables: Green
@@ -77,14 +79,16 @@ const char *get_file_color(const char *filename, mode_t mode) {
     return COLOR_RESET;              // Regular files: Default
 }
 
+// NEW FOR FEATURE 7: Main function with -R option
 int main(int argc, char const *argv[])
 {
     int long_listing = 0;
     int horizontal_display = 0;
+    int recursive = 0;  // NEW: Recursive flag
     int opt;
     
-    // Parse command line options
-    while ((opt = getopt(argc, (char *const *)argv, "lx")) != -1) {
+    // Parse command line options - UPDATED FOR FEATURE 7
+    while ((opt = getopt(argc, (char *const *)argv, "lxR")) != -1) {
         switch (opt) {
             case 'l':
                 long_listing = 1;
@@ -92,8 +96,11 @@ int main(int argc, char const *argv[])
             case 'x':
                 horizontal_display = 1;
                 break;
+            case 'R':  // NEW: Recursive option
+                recursive = 1;
+                break;
             default:
-                fprintf(stderr, "Usage: %s [-l] [-x] [directory...]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-l] [-x] [-R] [directory...]\n", argv[0]);
                 exit(1);
         }
     }
@@ -102,12 +109,20 @@ int main(int argc, char const *argv[])
     int non_opt_args = argc - optind;
     
     if (non_opt_args == 0) {
-        do_ls(".", long_listing, horizontal_display);
+        if (recursive) {
+            do_ls_recursive(".", long_listing, horizontal_display);
+        } else {
+            do_ls(".", long_listing, horizontal_display, 0);
+        }
     } else {
         for (int i = optind; i < argc; i++) {
-            printf("Directory listing of %s:\n", argv[i]);
-            do_ls(argv[i], long_listing, horizontal_display);
-            puts("");
+            if (recursive) {
+                do_ls_recursive(argv[i], long_listing, horizontal_display);
+            } else {
+                printf("Directory listing of %s:\n", argv[i]);
+                do_ls(argv[i], long_listing, horizontal_display, 0);
+                if (i < argc - 1) puts("");
+            }
         }
     }
     return 0;
@@ -135,7 +150,7 @@ void format_time(time_t mtime, char *time_str) {
     time_str[12] = '\0';
 }
 
-// Display files in column format (down then across) - UPDATED FOR FEATURE 6
+// Display files in column format (down then across)
 void display_columns(char **files, int count, int terminal_width) {
     if (count == 0) return;
     
@@ -165,7 +180,7 @@ void display_columns(char **files, int count, int terminal_width) {
     }
 }
 
-// Display files in horizontal format (left to right) - UPDATED FOR FEATURE 6
+// Display files in horizontal format (left to right)
 void display_horizontal(char **files, int count, int terminal_width) {
     if (count == 0) return;
     
@@ -195,8 +210,14 @@ void display_horizontal(char **files, int count, int terminal_width) {
     if (count > 0) printf("\n");
 }
 
-// MAIN do_ls FUNCTION with ALL features integrated - UPDATED FOR FEATURE 6
-void do_ls(const char *dir, int long_listing, int horizontal_display)
+// NEW FOR FEATURE 7: Recursive directory listing function
+void do_ls_recursive(const char *dir, int long_listing, int horizontal_display) {
+    printf("\n%s:\n", dir);
+    do_ls(dir, long_listing, horizontal_display, 1);  // Pass recursive=1
+}
+
+// MAIN do_ls FUNCTION with ALL features integrated - UPDATED FOR FEATURE 7
+void do_ls(const char *dir, int long_listing, int horizontal_display, int recursive)
 {
     struct dirent *entry;
     DIR *dp = opendir(dir);
@@ -207,10 +228,11 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         return;
     }
     
-    // Arrays to store file info for color display - NEW FOR FEATURE 6
+    // Arrays to store file info for color display
     char **files = NULL;
     char **colors = NULL;
     mode_t *modes = NULL;
+    int *is_directory = NULL;  // NEW: Track which files are directories
     
     // First pass: collect all file information
     errno = 0;
@@ -221,7 +243,7 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         count++;
         
         if (long_listing) {
-            // Long listing format - UPDATED FOR COLORS
+            // Long listing format with colors
             char full_path[1024];
             snprintf(full_path, sizeof(full_path), "%s/%s", dir, entry->d_name);
             
@@ -243,7 +265,7 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             char time_str[13];
             format_time(file_stat.st_mtime, time_str);
             
-            // Get color for the file - NEW FOR FEATURE 6
+            // Get color for the file
             const char *color = get_file_color(entry->d_name, file_stat.st_mode);
             
             printf("%s %2lu %-8s %-8s %8ld %s %s%s%s\n", 
@@ -261,16 +283,18 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
 
     // Handle column/horizontal display after reading all entries
     if (!long_listing) {
-        // Allocate memory for file info - NEW FOR FEATURE 6
+        // Allocate memory for file info
         files = malloc(count * sizeof(char *));
         colors = malloc(count * sizeof(char *));
         modes = malloc(count * sizeof(mode_t));
+        is_directory = malloc(count * sizeof(int));  // NEW: For recursive
         
-        if (!files || !colors || !modes) {
+        if (!files || !colors || !modes || !is_directory) {
             perror("malloc failed");
             if (files) free(files);
             if (colors) free(colors);
             if (modes) free(modes);
+            if (is_directory) free(is_directory);
             closedir(dp);
             return;
         }
@@ -312,6 +336,9 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             // Store file mode for color
             modes[index] = file_stat.st_mode;
             
+            // NEW FOR FEATURE 7: Track if this is a directory
+            is_directory[index] = S_ISDIR(file_stat.st_mode);
+            
             // Determine and store color
             const char *color_code = get_file_color(entry->d_name, file_stat.st_mode);
             colors[index] = malloc(strlen(color_code) + 1);
@@ -328,7 +355,7 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         // Sort the files alphabetically
         qsort(files, count, sizeof(char *), compare_strings);
         
-        // Choose display mode with colors - UPDATED FOR FEATURE 6
+        // Choose display mode with colors
         if (horizontal_display) {
             // Display with colors in horizontal format
             int max_len = 0;
@@ -394,7 +421,31 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             }
         }
         
-        // Cleanup - UPDATED FOR FEATURE 6
+        // NEW FOR FEATURE 7: Recursive directory traversal
+        if (recursive) {
+            for (int i = 0; i < count; i++) {
+                // Find if this file is a directory
+                int dir_flag = 0;
+                for (int j = 0; j < count; j++) {
+                    if (strcmp(files[i], files[j]) == 0) {
+                        dir_flag = is_directory[j];
+                        break;
+                    }
+                }
+                
+                // Skip . and .. directories to avoid infinite recursion
+                if (dir_flag && strcmp(files[i], ".") != 0 && strcmp(files[i], "..") != 0) {
+                    // Build full path for recursive call
+                    char full_path[1024];
+                    snprintf(full_path, sizeof(full_path), "%s/%s", dir, files[i]);
+                    
+                    // Recursive call
+                    do_ls_recursive(full_path, long_listing, horizontal_display);
+                }
+            }
+        }
+        
+        // Cleanup
         for (int i = 0; i < count; i++) {
             free(files[i]);
             free(colors[i]);
@@ -402,6 +453,7 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         free(files);
         free(colors);
         free(modes);
+        free(is_directory);
     }
     
     if (errno != 0) {
