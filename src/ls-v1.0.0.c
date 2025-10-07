@@ -1,7 +1,7 @@
 /*
  * Programming Assignment 02: lsv1.0.0
- * Updated for Feature 5: Alphabetical Sort
- * Features: Basic ls, Long format (-l), Column display, Horizontal display (-x), Alphabetical sort
+ * Updated for Feature 6: Colorized Output
+ * Features: Basic ls, Long format (-l), Column display, Horizontal display (-x), Alphabetical sort, Colors
  */
 
 #include <stdio.h>
@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <errno.h>
+#define _GNU_SOURCE
 #include <sys/stat.h>
 #include <getopt.h>
 #include <pwd.h>
@@ -20,6 +21,16 @@
 
 extern int errno;
 
+// ANSI Color Codes - NEW FOR FEATURE 6
+#define COLOR_RESET   "\033[0m"
+#define COLOR_BLUE    "\033[1;34m"
+#define COLOR_GREEN   "\033[1;32m"
+#define COLOR_RED     "\033[1;31m"
+#define COLOR_PINK    "\033[1;35m"
+#define COLOR_CYAN    "\033[1;36m"
+#define COLOR_YELLOW  "\033[1;33m"
+#define COLOR_REVERSE "\033[7m"
+
 // Function prototypes
 void do_ls(const char *dir, int long_listing, int horizontal_display);
 void mode_to_string(mode_t mode, char *str);
@@ -27,10 +38,43 @@ void format_time(time_t mtime, char *time_str);
 void display_columns(char **files, int count, int terminal_width);
 void display_horizontal(char **files, int count, int terminal_width);
 int compare_strings(const void *a, const void *b);
+const char *get_file_color(const char *filename, mode_t mode);  // NEW FOR FEATURE 6
 
-// Comparison function for qsort - NEW FOR FEATURE 5
+// Comparison function for qsort
 int compare_strings(const void *a, const void *b) {
     return strcmp(*(const char **)a, *(const char **)b);
+}
+
+// NEW FOR FEATURE 6: Determine color based on file type and permissions
+const char *get_file_color(const char *filename, mode_t mode) {
+    if (S_ISDIR(mode)) {
+        return COLOR_BLUE;           // Directories: Blue
+    }
+    else if (S_ISLNK(mode)) {
+        return COLOR_PINK;           // Symbolic links: Pink
+    }
+    else if (S_ISCHR(mode) || S_ISBLK(mode) || S_ISFIFO(mode)) {
+        return COLOR_REVERSE;        // Special files: Reverse video
+    }
+    else if (mode & S_IXUSR) {
+        return COLOR_GREEN;          // Executables: Green
+    }
+    else {
+        // Check for specific file extensions
+        const char *ext = strrchr(filename, '.');
+        if (ext) {
+            if (strcmp(ext, ".tar") == 0 || strcmp(ext, ".gz") == 0 || 
+                strcmp(ext, ".zip") == 0 || strcmp(ext, ".tgz") == 0 ||
+                strcmp(ext, ".bz2") == 0 || strcmp(ext, ".xz") == 0) {
+                return COLOR_RED;    // Archives: Red
+            }
+            else if (strcmp(ext, ".c") == 0 || strcmp(ext, ".h") == 0 ||
+                     strcmp(ext, ".cpp") == 0 || strcmp(ext, ".py") == 0) {
+                return COLOR_CYAN;   // Source code: Cyan
+            }
+        }
+    }
+    return COLOR_RESET;              // Regular files: Default
 }
 
 int main(int argc, char const *argv[])
@@ -39,7 +83,7 @@ int main(int argc, char const *argv[])
     int horizontal_display = 0;
     int opt;
     
-    // Parse command line options - UPDATED FOR FEATURE 4
+    // Parse command line options
     while ((opt = getopt(argc, (char *const *)argv, "lx")) != -1) {
         switch (opt) {
             case 'l':
@@ -91,7 +135,7 @@ void format_time(time_t mtime, char *time_str) {
     time_str[12] = '\0';
 }
 
-// Display files in column format (down then across)
+// Display files in column format (down then across) - UPDATED FOR FEATURE 6
 void display_columns(char **files, int count, int terminal_width) {
     if (count == 0) return;
     
@@ -121,7 +165,7 @@ void display_columns(char **files, int count, int terminal_width) {
     }
 }
 
-// Display files in horizontal format (left to right) - FEATURE 4
+// Display files in horizontal format (left to right) - UPDATED FOR FEATURE 6
 void display_horizontal(char **files, int count, int terminal_width) {
     if (count == 0) return;
     
@@ -151,7 +195,7 @@ void display_horizontal(char **files, int count, int terminal_width) {
     if (count > 0) printf("\n");
 }
 
-// MAIN do_ls FUNCTION with ALL features integrated
+// MAIN do_ls FUNCTION with ALL features integrated - UPDATED FOR FEATURE 6
 void do_ls(const char *dir, int long_listing, int horizontal_display)
 {
     struct dirent *entry;
@@ -163,7 +207,12 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         return;
     }
     
-    // First pass: count files and handle long listing
+    // Arrays to store file info for color display - NEW FOR FEATURE 6
+    char **files = NULL;
+    char **colors = NULL;
+    mode_t *modes = NULL;
+    
+    // First pass: collect all file information
     errno = 0;
     while ((entry = readdir(dp)) != NULL) {
         if (entry->d_name[0] == '.')
@@ -172,7 +221,7 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
         count++;
         
         if (long_listing) {
-            // Long listing format
+            // Long listing format - UPDATED FOR COLORS
             char full_path[1024];
             snprintf(full_path, sizeof(full_path), "%s/%s", dir, entry->d_name);
             
@@ -194,19 +243,38 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             char time_str[13];
             format_time(file_stat.st_mtime, time_str);
             
-            printf("%s %2lu %-8s %-8s %8ld %s %s\n", 
+            // Get color for the file - NEW FOR FEATURE 6
+            const char *color = get_file_color(entry->d_name, file_stat.st_mode);
+            
+            printf("%s %2lu %-8s %-8s %8ld %s %s%s%s\n", 
                    permissions,
                    file_stat.st_nlink,
                    pw ? pw->pw_name : "unknown",
                    gr ? gr->gr_name : "unknown", 
                    file_stat.st_size,
                    time_str,
-                   entry->d_name);
+                   color,  // Color start
+                   entry->d_name,
+                   COLOR_RESET);  // Color reset
         }
     }
 
     // Handle column/horizontal display after reading all entries
     if (!long_listing) {
+        // Allocate memory for file info - NEW FOR FEATURE 6
+        files = malloc(count * sizeof(char *));
+        colors = malloc(count * sizeof(char *));
+        modes = malloc(count * sizeof(mode_t));
+        
+        if (!files || !colors || !modes) {
+            perror("malloc failed");
+            if (files) free(files);
+            if (colors) free(colors);
+            if (modes) free(modes);
+            closedir(dp);
+            return;
+        }
+        
         // Get terminal width
         struct winsize w;
         int terminal_width = 80; // Default fallback
@@ -215,21 +283,24 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             terminal_width = w.ws_col;
         }
         
-        // Create array of filenames
-        char **files = malloc(count * sizeof(char *));
-        if (!files) {
-            perror("malloc failed");
-            closedir(dp);
-            return;
-        }
-        
-        // Reset and read directory again to collect filenames
+        // Reset and read directory again to collect filenames with metadata
         rewinddir(dp);
         int index = 0;
         errno = 0;
         while ((entry = readdir(dp)) != NULL) {
             if (entry->d_name[0] == '.') continue;
             
+            // Get file metadata for color determination
+            char full_path[1024];
+            snprintf(full_path, sizeof(full_path), "%s/%s", dir, entry->d_name);
+            struct stat file_stat;
+            
+            if (stat(full_path, &file_stat) == -1) {
+                perror("stat");
+                continue;
+            }
+            
+            // Store filename
             files[index] = malloc(strlen(entry->d_name) + 1);
             if (!files[index]) {
                 perror("malloc failed");
@@ -237,24 +308,100 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
                 return;
             }
             strcpy(files[index], entry->d_name);
+            
+            // Store file mode for color
+            modes[index] = file_stat.st_mode;
+            
+            // Determine and store color
+            const char *color_code = get_file_color(entry->d_name, file_stat.st_mode);
+            colors[index] = malloc(strlen(color_code) + 1);
+            if (!colors[index]) {
+                perror("malloc failed");
+                closedir(dp);
+                return;
+            }
+            strcpy(colors[index], color_code);
+            
             index++;
         }
         
-        // NEW FOR FEATURE 5: SORT THE FILES ALPHABETICALLY
+        // Sort the files alphabetically
         qsort(files, count, sizeof(char *), compare_strings);
         
-        // Choose display mode
+        // Choose display mode with colors - UPDATED FOR FEATURE 6
         if (horizontal_display) {
-            display_horizontal(files, count, terminal_width);
+            // Display with colors in horizontal format
+            int max_len = 0;
+            for (int i = 0; i < count; i++) {
+                int len = strlen(files[i]);
+                if (len > max_len) max_len = len;
+            }
+            
+            int col_width = max_len + 2;
+            int current_width = 0;
+            
+            for (int i = 0; i < count; i++) {
+                int needed_width = strlen(files[i]) + 2;
+                
+                if (current_width + needed_width > terminal_width && current_width > 0) {
+                    printf("\n");
+                    current_width = 0;
+                }
+                
+                // Find the color for this file
+                const char *color = COLOR_RESET;
+                for (int j = 0; j < count; j++) {
+                    if (strcmp(files[i], files[j]) == 0) {
+                        color = colors[j];
+                        break;
+                    }
+                }
+                
+                printf("%s%-*s%s", color, col_width, files[i], COLOR_RESET);
+                current_width += col_width;
+            }
+            if (count > 0) printf("\n");
         } else {
-            display_columns(files, count, terminal_width);
+            // Display with colors in column format
+            int max_len = 0;
+            for (int i = 0; i < count; i++) {
+                int len = strlen(files[i]);
+                if (len > max_len) max_len = len;
+            }
+            
+            int col_width = max_len + 2;
+            int num_cols = terminal_width / col_width;
+            if (num_cols == 0) num_cols = 1;
+            
+            int num_rows = (count + num_cols - 1) / num_cols;
+            
+            for (int row = 0; row < num_rows; row++) {
+                for (int col = 0; col < num_cols; col++) {
+                    int index = row + col * num_rows;
+                    if (index < count) {
+                        // Find the color for this file
+                        const char *color = COLOR_RESET;
+                        for (int j = 0; j < count; j++) {
+                            if (strcmp(files[index], files[j]) == 0) {
+                                color = colors[j];
+                                break;
+                            }
+                        }
+                        printf("%s%-*s%s", color, col_width, files[index], COLOR_RESET);
+                    }
+                }
+                printf("\n");
+            }
         }
         
-        // Cleanup
+        // Cleanup - UPDATED FOR FEATURE 6
         for (int i = 0; i < count; i++) {
             free(files[i]);
+            free(colors[i]);
         }
         free(files);
+        free(colors);
+        free(modes);
     }
     
     if (errno != 0) {
