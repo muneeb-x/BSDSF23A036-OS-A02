@@ -1,12 +1,9 @@
 /*
  * Programming Assignment 02: lsv1.0.0
- * This is the source file of version 1.0.0
- * Read the write-up of the assignment to add the features to this base version
- * Usage:
- *       $ lsv1.0.0 
- *       % lsv1.0.0  /home
- *       $ lsv1.0.0  /home/kali/   /etc/
+ * Updated for Feature 5: Alphabetical Sort
+ * Features: Basic ls, Long format (-l), Column display, Horizontal display (-x), Alphabetical sort
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -18,33 +15,41 @@
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
-#include <sys/ioctl.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
+
 extern int errno;
+
 // Function prototypes
 void do_ls(const char *dir, int long_listing, int horizontal_display);
 void mode_to_string(mode_t mode, char *str);
 void format_time(time_t mtime, char *time_str);
 void display_columns(char **files, int count, int terminal_width);
 void display_horizontal(char **files, int count, int terminal_width);
+int compare_strings(const void *a, const void *b);
+
+// Comparison function for qsort - NEW FOR FEATURE 5
+int compare_strings(const void *a, const void *b) {
+    return strcmp(*(const char **)a, *(const char **)b);
+}
 
 int main(int argc, char const *argv[])
 {
     int long_listing = 0;
-    int horizontal_display = 0; 
+    int horizontal_display = 0;
     int opt;
     
-    // Parse command line options
+    // Parse command line options - UPDATED FOR FEATURE 4
     while ((opt = getopt(argc, (char *const *)argv, "lx")) != -1) {
         switch (opt) {
             case 'l':
                 long_listing = 1;
                 break;
-	    case 'x':
+            case 'x':
                 horizontal_display = 1;
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-l] [directory...]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-l] [-x] [directory...]\n", argv[0]);
                 exit(1);
         }
     }
@@ -86,36 +91,6 @@ void format_time(time_t mtime, char *time_str) {
     time_str[12] = '\0';
 }
 
-// Display files in horizontal (across) format
-void display_horizontal(char **files, int count, int terminal_width) {
-    if (count == 0) return;
-    
-    // Find the longest filename length
-    int max_len = 0;
-    for (int i = 0; i < count; i++) {
-        int len = strlen(files[i]);
-        if (len > max_len) max_len = len;
-    }
-    
-    int col_width = max_len + 2; // Add 2 spaces between columns
-    int current_width = 0;
-    
-    for (int i = 0; i < count; i++) {
-        int needed_width = strlen(files[i]) + 2;
-        
-        // Check if we need a new line
-        if (current_width + needed_width > terminal_width && current_width > 0) {
-            printf("\n");
-            current_width = 0;
-        }
-        
-        printf("%-*s", col_width, files[i]);
-        current_width += col_width;
-    }
-    
-    if (count > 0) printf("\n");
-}
-
 // Display files in column format (down then across)
 void display_columns(char **files, int count, int terminal_width) {
     if (count == 0) return;
@@ -146,11 +121,42 @@ void display_columns(char **files, int count, int terminal_width) {
     }
 }
 
+// Display files in horizontal format (left to right) - FEATURE 4
+void display_horizontal(char **files, int count, int terminal_width) {
+    if (count == 0) return;
+    
+    // Find the longest filename length
+    int max_len = 0;
+    for (int i = 0; i < count; i++) {
+        int len = strlen(files[i]);
+        if (len > max_len) max_len = len;
+    }
+    
+    int col_width = max_len + 2; // Add 2 spaces between columns
+    int current_width = 0;
+    
+    for (int i = 0; i < count; i++) {
+        int needed_width = strlen(files[i]) + 2;
+        
+        // Check if we need a new line
+        if (current_width + needed_width > terminal_width && current_width > 0) {
+            printf("\n");
+            current_width = 0;
+        }
+        
+        printf("%-*s", col_width, files[i]);
+        current_width += col_width;
+    }
+    
+    if (count > 0) printf("\n");
+}
+
+// MAIN do_ls FUNCTION with ALL features integrated
 void do_ls(const char *dir, int long_listing, int horizontal_display)
 {
     struct dirent *entry;
     DIR *dp = opendir(dir);
-    int count = 0;
+    int count = 0;  // Count non-hidden files
     
     if (dp == NULL) {
         fprintf(stderr, "Cannot open directory: %s\n", dir);
@@ -233,6 +239,9 @@ void do_ls(const char *dir, int long_listing, int horizontal_display)
             strcpy(files[index], entry->d_name);
             index++;
         }
+        
+        // NEW FOR FEATURE 5: SORT THE FILES ALPHABETICALLY
+        qsort(files, count, sizeof(char *), compare_strings);
         
         // Choose display mode
         if (horizontal_display) {
